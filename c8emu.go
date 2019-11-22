@@ -123,6 +123,12 @@ func (emu *c8Emu) LoadFromFile(name string) {
 	}
 }
 
+func (emu *c8Emu) Cycles(n int) {
+	for i := 0; i < n; i++ {
+		emu.Cycle()
+	}
+}
+
 func (emu *c8Emu) Cycle() {
 	op := (uint16(emu.memory[emu.pc]) << 8) | uint16(emu.memory[emu.pc+1])
 

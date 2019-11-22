@@ -13,14 +13,15 @@ import (
 	"unsafe"
 )
 
-const (
-	scale = 10
-)
-
 var (
-	window   *sdl.Window
-	renderer *sdl.Renderer
-	texture  *sdl.Texture
+	window         *sdl.Window
+	renderer       *sdl.Renderer
+	texture        *sdl.Texture
+	interval       = uint32(1000 / 60)
+	displayScale   = int32(10)
+	maxCycles      = 12
+	audioFrequency = 48000
+	audioTone      = 440
 )
 
 //export sineWave
@@ -31,7 +32,7 @@ func sineWave(userdata unsafe.Pointer, stream *C.Uint8, length C.int) {
 
 	var phase float64
 	for i := 0; i < n; i += 2 {
-		phase += 2 * math.Pi * 440 / 44100
+		phase += 2 * math.Pi * float64(audioTone) / float64(audioFrequency)
 		sample := C.Uint8((math.Sin(phase) + 0.999999) * 128)
 		buf[i] = sample
 		buf[i+1] = sample
@@ -45,7 +46,7 @@ func init() {
 		log.Fatal(err)
 	}
 
-	window, err = sdl.CreateWindow("c8emu", sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, c8emu.DisplayWidth*scale, c8emu.DisplayHeight*scale, sdl.WINDOW_SHOWN)
+	window, err = sdl.CreateWindow("c8emu", sdl.WINDOWPOS_CENTERED, sdl.WINDOWPOS_CENTERED, c8emu.DisplayWidth*displayScale, c8emu.DisplayHeight*displayScale, sdl.WINDOW_SHOWN)
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -61,8 +62,8 @@ func init() {
 	}
 
 	audioSpec := &sdl.AudioSpec{
-		Freq:     44100,
-		Format:   sdl.AUDIO_S16SYS,
+		Freq:     int32(audioFrequency),
+		Format:   sdl.AUDIO_U8,
 		Channels: 1,
 		Samples:  2048,
 		Callback: sdl.AudioCallback(C.sineWave),
@@ -77,7 +78,7 @@ func playSound() {
 	sdl.PauseAudio(false)
 
 	go func() {
-		t := time.NewTimer(time.Second / time.Duration(10))
+		t := time.NewTimer(time.Second / time.Duration(60))
 		select {
 		case <-t.C:
 			sdl.PauseAudio(true)
@@ -95,20 +96,69 @@ func main() {
 	playSound()
 
 	emu := c8emu.New()
-	emu.LoadFromFile("roms/PONG2")
+	emu.LoadFromFile("roms/BRIX")
 
-	ticker := time.NewTicker(time.Second / time.Duration(60))
+	paused := false
+	muted := false
 	running := true
 
-	for range ticker.C {
-		if !running {
-			break
+	for running {
+		tick1 := sdl.GetTicks()
+
+		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
+			switch e := event.(type) {
+
+			case *sdl.QuitEvent:
+				running = false
+				break
+
+			case *sdl.KeyboardEvent:
+				active := e.Type == sdl.KEYUP
+
+				switch e.Keysym.Sym {
+
+				case sdl.K_1:
+					emu.SetKey(0x1, active)
+				case sdl.K_2:
+					emu.SetKey(0x2, active)
+				case sdl.K_3:
+					emu.SetKey(0x3, active)
+				case sdl.K_4:
+					emu.SetKey(0xC, active)
+				case sdl.K_q:
+					emu.SetKey(0x4, active)
+				case sdl.K_w:
+					emu.SetKey(0x5, active)
+				case sdl.K_e:
+					emu.SetKey(0x6, active)
+				case sdl.K_r:
+					emu.SetKey(0xD, active)
+				case sdl.K_a:
+					emu.SetKey(0x7, active)
+				case sdl.K_s:
+					emu.SetKey(0x8, active)
+				case sdl.K_d:
+					emu.SetKey(0x9, active)
+				case sdl.K_f:
+					emu.SetKey(0xE, active)
+				case sdl.K_z:
+					emu.SetKey(0xA, active)
+				case sdl.K_x:
+					emu.SetKey(0x0, active)
+				case sdl.K_c:
+					emu.SetKey(0xB, active)
+				case sdl.K_v:
+					emu.SetKey(0xF, active)
+				}
+			}
 		}
 
-		emu.Cycle()
+		if !paused {
+			emu.Cycles(maxCycles)
 
-		if emu.ShouldSound() {
-			playSound()
+			if emu.ShouldSound() && !muted {
+				playSound()
+			}
 		}
 
 		if emu.ShouldDraw() {
@@ -133,89 +183,13 @@ func main() {
 			renderer.Present()
 		}
 
-		for event := sdl.PollEvent(); event != nil; event = sdl.PollEvent() {
-			switch e := event.(type) {
+		tick2 := sdl.GetTicks()
 
-			case *sdl.QuitEvent:
-				running = false
-				break
+		elapsed := tick2 - tick1
+		remaining := interval - elapsed
 
-			case *sdl.KeyboardEvent:
-				if e.Type == sdl.KEYUP {
-					switch e.Keysym.Sym {
-
-					case sdl.K_1:
-						emu.SetKey(0x1, false)
-					case sdl.K_2:
-						emu.SetKey(0x2, false)
-					case sdl.K_3:
-						emu.SetKey(0x3, false)
-					case sdl.K_4:
-						emu.SetKey(0xC, false)
-					case sdl.K_q:
-						emu.SetKey(0x4, false)
-					case sdl.K_w:
-						emu.SetKey(0x5, false)
-					case sdl.K_e:
-						emu.SetKey(0x6, false)
-					case sdl.K_r:
-						emu.SetKey(0xD, false)
-					case sdl.K_a:
-						emu.SetKey(0x7, false)
-					case sdl.K_s:
-						emu.SetKey(0x8, false)
-					case sdl.K_d:
-						emu.SetKey(0x9, false)
-					case sdl.K_f:
-						emu.SetKey(0xE, false)
-					case sdl.K_z:
-						emu.SetKey(0xA, false)
-					case sdl.K_x:
-						emu.SetKey(0x0, false)
-					case sdl.K_c:
-						emu.SetKey(0xB, false)
-					case sdl.K_v:
-						emu.SetKey(0xF, false)
-					}
-
-				} else if e.Type == sdl.KEYDOWN {
-					switch e.Keysym.Sym {
-
-					case sdl.K_1:
-						emu.SetKey(0x1, true)
-					case sdl.K_2:
-						emu.SetKey(0x2, true)
-					case sdl.K_3:
-						emu.SetKey(0x3, true)
-					case sdl.K_4:
-						emu.SetKey(0xC, true)
-					case sdl.K_q:
-						emu.SetKey(0x4, true)
-					case sdl.K_w:
-						emu.SetKey(0x5, true)
-					case sdl.K_e:
-						emu.SetKey(0x6, true)
-					case sdl.K_r:
-						emu.SetKey(0xD, true)
-					case sdl.K_a:
-						emu.SetKey(0x7, true)
-					case sdl.K_s:
-						emu.SetKey(0x8, true)
-					case sdl.K_d:
-						emu.SetKey(0x9, true)
-					case sdl.K_f:
-						emu.SetKey(0xE, true)
-					case sdl.K_z:
-						emu.SetKey(0xA, true)
-					case sdl.K_x:
-						emu.SetKey(0x0, true)
-					case sdl.K_c:
-						emu.SetKey(0xB, true)
-					case sdl.K_v:
-						emu.SetKey(0xF, true)
-					}
-				}
-			}
+		if elapsed < interval {
+			sdl.Delay(remaining)
 		}
 	}
 }
